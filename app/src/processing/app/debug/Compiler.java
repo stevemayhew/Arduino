@@ -50,6 +50,7 @@ public class Compiler implements MessageConsumer {
   boolean sketchIsCompiled;
 
   RunnerException exception;
+  PrintWriter outputFile = null;
 
   public Compiler() { }
 
@@ -246,8 +247,25 @@ public class Compiler implements MessageConsumer {
     baseCommandLinker.add(runtimeLibraryName);
     baseCommandLinker.add("-L" + buildPath);
     baseCommandLinker.add("-lm");
+    
+    if (Preferences.getBoolean("compiler.map_file")) 
+        baseCommandLinker.add("-Wl,-Map," + sketch.getFolder() + File.separator + sketch.getName() + ".map");
 
     execAsynchronously(baseCommandLinker);
+    
+    // 4a. create the size output
+    if (Preferences.getBoolean("compiler.detailed_size")) {
+      List baseCommandsize = new ArrayList(Arrays.asList(new String[] {
+        avrBasePath + "avr-size",
+        "-C",
+        "--mcu=" + boardPreferences.get("build.mcu"),
+        buildPath + File.separator + primaryClassName + ".elf"//,
+        //" > ",
+        //sketch.getFolder() + File.separator + sketch.getName() + ".size"
+      }));
+
+      execAsynchronously(baseCommandsize);      
+    }
 
     List baseCommandObjcopy = new ArrayList(Arrays.asList(new String[] {
       avrBasePath + "avr-objcopy",
@@ -281,6 +299,18 @@ public class Compiler implements MessageConsumer {
     execAsynchronously(commandObjcopy);
     
     sketch.setCompilingProgress(90);
+    
+    // 7. produce the .lst file
+    if (Preferences.getBoolean("compiler.lst_file")) {
+      List baseCommandObjdump = new ArrayList(Arrays.asList(new String[] {
+        avrBasePath + "avr-objdump",
+        "-d",
+        "-S",
+        buildPath + File.separator + primaryClassName + ".elf"
+      }));
+
+      execAsynchronously(baseCommandObjdump, sketch.getFolder() + File.separator + sketch.getName() + ".lst");
+    }
    
     return true;
   }
@@ -423,6 +453,15 @@ public class Compiler implements MessageConsumer {
    * Either succeeds or throws a RunnerException fit for public consumption.
    */
   private void execAsynchronously(List commandList) throws RunnerException {
+	  execAsynchronouslyFile(commandList, null);
+  }
+
+  private void execAsynchronously(List commandList, String outputFileName)
+		  throws RunnerException {
+	  execAsynchronouslyFile(commandList, outputFileName);
+  }
+
+  private void execAsynchronouslyFile(List commandList, String outputFileName) throws RunnerException  {
     String[] command = new String[commandList.size()];
     commandList.toArray(command);
     int result = 0;
@@ -436,6 +475,19 @@ public class Compiler implements MessageConsumer {
 
     firstErrorFound = false;  // haven't found any errors yet
     secondErrorFound = false;
+    
+    if (outputFileName != null)
+    {
+      try {
+        File filename = new File (outputFileName);
+        FileWriter fout = new FileWriter (filename);
+        outputFile = new PrintWriter (fout, true);
+      } catch (IOException e) {
+        RunnerException re = new RunnerException(e.getMessage());
+        re.hideStackTrace();
+        throw re;
+      }
+    }
 
     Process process;
     
@@ -482,6 +534,12 @@ public class Compiler implements MessageConsumer {
       re.hideStackTrace();
       throw re;
     }
+    
+    if (outputFile != null) {
+      outputFile.flush ();
+      outputFile.close ();
+      outputFile = null;
+    }
   }
 
 
@@ -492,117 +550,122 @@ public class Compiler implements MessageConsumer {
    * and line number, which is then reported back to Editor.
    */
   public void message(String s) {
-    int i;
+	  int i;
 
-    // remove the build path so people only see the filename
-    // can't use replaceAll() because the path may have characters in it which
-    // have meaning in a regular expression.
-    if (!verbose) {
-      while ((i = s.indexOf(buildPath + File.separator)) != -1) {
-        s = s.substring(0, i) + s.substring(i + (buildPath + File.separator).length());
-      }
-    }
-  
-    // look for error line, which contains file name, line number,
-    // and at least the first line of the error message
-    String errorFormat = "([\\w\\d_]+.\\w+):(\\d+):\\s*error:\\s*(.*)\\s*";
-    String[] pieces = PApplet.match(s, errorFormat);
+	  if (outputFile != null) {
+		  outputFile.print (s);
+		  return;
+	  } else {
+		  // remove the build path so people only see the filename
+		  // can't use replaceAll() because the path may have characters in it which
+		  // have meaning in a regular expression.
+		  if (!verbose) {
+			  while ((i = s.indexOf(buildPath + File.separator)) != -1) {
+				  s = s.substring(0, i) + s.substring(i + (buildPath + File.separator).length());
+			  }
+		  }
+	  }
 
-//    if (pieces != null && exception == null) {
-//      exception = sketch.placeException(pieces[3], pieces[1], PApplet.parseInt(pieces[2]) - 1);
-//      if (exception != null) exception.hideStackTrace();
-//    }
-    
-    if (pieces != null) {
-      String error = pieces[3], msg = "";
-      
-      if (pieces[3].trim().equals("SPI.h: No such file or directory")) {
-        error = _("Please import the SPI library from the Sketch > Import Library menu.");
-        msg = _("\nAs of Arduino 0019, the Ethernet library depends on the SPI library." +
-              "\nYou appear to be using it or another library that depends on the SPI library.\n\n");
-      }
-      
-      if (pieces[3].trim().equals("'BYTE' was not declared in this scope")) {
-        error = _("The 'BYTE' keyword is no longer supported.");
-        msg = _("\nAs of Arduino 1.0, the 'BYTE' keyword is no longer supported." +
-              "\nPlease use Serial.write() instead.\n\n");
-      }
-      
-      if (pieces[3].trim().equals("no matching function for call to 'Server::Server(int)'")) {
-        error = _("The Server class has been renamed EthernetServer.");
-        msg = _("\nAs of Arduino 1.0, the Server class in the Ethernet library " +
-              "has been renamed to EthernetServer.\n\n");
-      }
-      
-      if (pieces[3].trim().equals("no matching function for call to 'Client::Client(byte [4], int)'")) {
-        error = _("The Client class has been renamed EthernetClient.");
-        msg = _("\nAs of Arduino 1.0, the Client class in the Ethernet library " +
-              "has been renamed to EthernetClient.\n\n");
-      }
-      
-      if (pieces[3].trim().equals("'Udp' was not declared in this scope")) {
-        error = _("The Udp class has been renamed EthernetUdp.");
-        msg = _("\nAs of Arduino 1.0, the Udp class in the Ethernet library " +
-              "has been renamed to EthernetUdp.\n\n");
-      }
-      
-      if (pieces[3].trim().equals("'class TwoWire' has no member named 'send'")) {
-        error = _("Wire.send() has been renamed Wire.write().");
-        msg = _("\nAs of Arduino 1.0, the Wire.send() function was renamed " +
-              "to Wire.write() for consistency with other libraries.\n\n");
-      }
-      
-      if (pieces[3].trim().equals("'class TwoWire' has no member named 'receive'")) {
-        error = _("Wire.receive() has been renamed Wire.read().");
-        msg = _("\nAs of Arduino 1.0, the Wire.receive() function was renamed " +
-              "to Wire.read() for consistency with other libraries.\n\n");
-      }
+	  // look for error line, which contains file name, line number,
+	  // and at least the first line of the error message
+	  String errorFormat = "([\\w\\d_]+.\\w+):(\\d+):\\s*error:\\s*(.*)\\s*";
+	  String[] pieces = PApplet.match(s, errorFormat);
 
-      if (pieces[3].trim().equals("'Mouse' was not declared in this scope")) {
-        error = _("'Mouse' only supported on the Arduino Leonardo");
-        //msg = _("\nThe 'Mouse' class is only supported on the Arduino Leonardo.\n\n");
-      }
-      
-      if (pieces[3].trim().equals("'Keyboard' was not declared in this scope")) {
-        error = _("'Keyboard' only supported on the Arduino Leonardo");
-        //msg = _("\nThe 'Keyboard' class is only supported on the Arduino Leonardo.\n\n");
-      }
-      
-      RunnerException e = null;
-      if (!sketchIsCompiled) {
-        // Place errors when compiling the sketch, but never while compiling libraries
-        // or the core.  The user's sketch might contain the same filename!
-        e = sketch.placeException(error, pieces[1], PApplet.parseInt(pieces[2]) - 1);
-      }
+	  //    if (pieces != null && exception == null) {
+	  //      exception = sketch.placeException(pieces[3], pieces[1], PApplet.parseInt(pieces[2]) - 1);
+	  //      if (exception != null) exception.hideStackTrace();
+	  //    }
 
-      // replace full file path with the name of the sketch tab (unless we're
-      // in verbose mode, in which case don't modify the compiler output)
-      if (e != null && !verbose) {
-        SketchCode code = sketch.getCode(e.getCodeIndex());
-        String fileName = (code.isExtension("ino") || code.isExtension("pde")) ? code.getPrettyName() : code.getFileName();
-        int lineNum = e.getCodeLine() + 1;
-        s = fileName + ":" + lineNum + ": error: " + pieces[3] + msg;        
-      }
-            
-      if (exception == null && e != null) {
-        exception = e;
-        exception.hideStackTrace();
-      }      
-    }
-    
-		if (s.contains("undefined reference to `SPIClass::begin()'")
-				&& s.contains("libraries/Robot_Control")) {
-			String error = _("Please import the SPI library from the Sketch > Import Library menu.");
-			exception = new RunnerException(error);
-		}
-    
-		if (s.contains("undefined reference to `Wire'")
-				&& s.contains("libraries/Robot_Control")) {
-			String error = _("Please import the Wire library from the Sketch > Import Library menu.");
-			exception = new RunnerException(error);
-		}
-		
-    System.err.print(s);
+	  if (pieces != null) {
+		  String error = pieces[3], msg = "";
+
+		  if (pieces[3].trim().equals("SPI.h: No such file or directory")) {
+			  error = _("Please import the SPI library from the Sketch > Import Library menu.");
+			  msg = _("\nAs of Arduino 0019, the Ethernet library depends on the SPI library." +
+					  "\nYou appear to be using it or another library that depends on the SPI library.\n\n");
+		  }
+
+		  if (pieces[3].trim().equals("'BYTE' was not declared in this scope")) {
+			  error = _("The 'BYTE' keyword is no longer supported.");
+			  msg = _("\nAs of Arduino 1.0, the 'BYTE' keyword is no longer supported." +
+					  "\nPlease use Serial.write() instead.\n\n");
+		  }
+
+		  if (pieces[3].trim().equals("no matching function for call to 'Server::Server(int)'")) {
+			  error = _("The Server class has been renamed EthernetServer.");
+			  msg = _("\nAs of Arduino 1.0, the Server class in the Ethernet library " +
+					  "has been renamed to EthernetServer.\n\n");
+		  }
+
+		  if (pieces[3].trim().equals("no matching function for call to 'Client::Client(byte [4], int)'")) {
+			  error = _("The Client class has been renamed EthernetClient.");
+			  msg = _("\nAs of Arduino 1.0, the Client class in the Ethernet library " +
+					  "has been renamed to EthernetClient.\n\n");
+		  }
+
+		  if (pieces[3].trim().equals("'Udp' was not declared in this scope")) {
+			  error = _("The Udp class has been renamed EthernetUdp.");
+			  msg = _("\nAs of Arduino 1.0, the Udp class in the Ethernet library " +
+					  "has been renamed to EthernetUdp.\n\n");
+		  }
+
+		  if (pieces[3].trim().equals("'class TwoWire' has no member named 'send'")) {
+			  error = _("Wire.send() has been renamed Wire.write().");
+			  msg = _("\nAs of Arduino 1.0, the Wire.send() function was renamed " +
+					  "to Wire.write() for consistency with other libraries.\n\n");
+		  }
+
+		  if (pieces[3].trim().equals("'class TwoWire' has no member named 'receive'")) {
+			  error = _("Wire.receive() has been renamed Wire.read().");
+			  msg = _("\nAs of Arduino 1.0, the Wire.receive() function was renamed " +
+					  "to Wire.read() for consistency with other libraries.\n\n");
+		  }
+
+		  if (pieces[3].trim().equals("'Mouse' was not declared in this scope")) {
+			  error = _("'Mouse' only supported on the Arduino Leonardo");
+			  //msg = _("\nThe 'Mouse' class is only supported on the Arduino Leonardo.\n\n");
+		  }
+
+		  if (pieces[3].trim().equals("'Keyboard' was not declared in this scope")) {
+			  error = _("'Keyboard' only supported on the Arduino Leonardo");
+			  //msg = _("\nThe 'Keyboard' class is only supported on the Arduino Leonardo.\n\n");
+		  }
+
+		  RunnerException e = null;
+		  if (!sketchIsCompiled) {
+			  // Place errors when compiling the sketch, but never while compiling libraries
+			  // or the core.  The user's sketch might contain the same filename!
+			  e = sketch.placeException(error, pieces[1], PApplet.parseInt(pieces[2]) - 1);
+		  }
+
+		  // replace full file path with the name of the sketch tab (unless we're
+		  // in verbose mode, in which case don't modify the compiler output)
+		  if (e != null && !verbose) {
+			  SketchCode code = sketch.getCode(e.getCodeIndex());
+			  String fileName = (code.isExtension("ino") || code.isExtension("pde")) ? code.getPrettyName() : code.getFileName();
+			  int lineNum = e.getCodeLine() + 1;
+			  s = fileName + ":" + lineNum + ": error: " + pieces[3] + msg;        
+		  }
+
+		  if (exception == null && e != null) {
+			  exception = e;
+			  exception.hideStackTrace();
+		  }      
+	  }
+
+	  if (s.contains("undefined reference to `SPIClass::begin()'")
+			  && s.contains("libraries/Robot_Control")) {
+		  String error = _("Please import the SPI library from the Sketch > Import Library menu.");
+		  exception = new RunnerException(error);
+	  }
+
+	  if (s.contains("undefined reference to `Wire'")
+			  && s.contains("libraries/Robot_Control")) {
+		  String error = _("Please import the Wire library from the Sketch > Import Library menu.");
+		  exception = new RunnerException(error);
+	  }
+
+	  System.err.print(s);
   }
 
   /////////////////////////////////////////////////////////////////////////////
@@ -643,6 +706,7 @@ public class Compiler implements MessageConsumer {
       Preferences.getBoolean("build.verbose") ? "-Wall" : "-w", // show warnings if verbose
       "-ffunction-sections", // place each function in its own section
       "-fdata-sections",
+      "-std=c99", 
       "-mmcu=" + boardPreferences.get("build.mcu"),
       "-DF_CPU=" + boardPreferences.get("build.f_cpu"),
       "-MMD", // output dependancy info
@@ -672,6 +736,7 @@ public class Compiler implements MessageConsumer {
       "-c", // compile, don't link
       "-g", // include debugging info (so errors include line numbers)
       "-Os", // optimize for size
+      "-std=gnu++98",
       Preferences.getBoolean("build.verbose") ? "-Wall" : "-w", // show warnings if verbose
       "-fno-exceptions",
       "-ffunction-sections", // place each function in its own section

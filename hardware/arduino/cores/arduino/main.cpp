@@ -33,9 +33,9 @@ int main(void)
 
 	initVariant();
 
-#if defined(USBCON)
-	USBDevice.attach();
-#endif
+// #if defined(USBCON)
+// 	USBDevice.attach();
+// #endif
 	
 	setup();
     
