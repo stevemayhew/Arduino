@@ -306,6 +306,37 @@ micro.build.extra_flags={build.usb_flags}
 
 ##############################################################
 
+smicro.name=Micro LUFA
+smicro.upload.tool=avrdude
+smicro.upload.protocol=avr109
+smicro.upload.maximum_size=28672
+smicro.upload.maximum_data_size=2560
+smicro.upload.speed=57600
+smicro.upload.disable_flushing=true
+smicro.upload.use_1200bps_touch=true
+smicro.upload.wait_for_upload_port=true
+
+smicro.bootloader.tool=avrdude
+smicro.bootloader.low_fuses=0xff
+smicro.bootloader.high_fuses=0xd8
+smicro.bootloader.extended_fuses=0xcb
+smicro.bootloader.file=caterina/Caterina-Micro.hex
+smicro.bootloader.unlock_bits=0x3F
+smicro.bootloader.lock_bits=0x2F
+
+smicro.build.mcu=atmega32u4
+smicro.build.f_cpu=16000000L
+smicro.build.vid=0x2341
+smicro.build.pid=0x8037
+smicro.build.usb_product=""
+smicro.build.board=AVR_MICRO
+smicro.build.core=arduino
+smicro.build.variant=micro
+smicro.build.extra_flags=-DUSE_LUFA
+
+
+##############################################################
+
 esplora.name=Arduino Esplora
 esplora.vid.0=0x2341
 esplora.pid.0=0x003c

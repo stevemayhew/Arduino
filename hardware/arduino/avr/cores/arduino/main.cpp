@@ -23,7 +23,7 @@ int main(void)
 {
 	init();
 
-#if defined(USBCON)
+#if defined(USBCON) && !defined(USE_LUFA)
 	USBDevice.attach();
 #endif
 	

@@ -637,6 +637,9 @@ public class Compiler implements MessageConsumer {
   // <buildPath>/<library>/
   void compileLibraries(List<File> includeFolders) throws RunnerException {
     for (Library lib : sketch.getImportedLibraries()) {
+     if (verbose) {
+       System.out.println(I18n.format(_("Compile Library: {0} {1}"), lib.getFolder().getAbsolutePath(),  lib.getName()));
+     }
       compileLibrary(lib, includeFolders);
     }
   }
@@ -690,6 +693,10 @@ public class Compiler implements MessageConsumer {
     File coreFolder = prefs.getFile("build.core.path");
     File variantFolder = prefs.getFile("build.variant.path");
     File buildFolder = prefs.getFile("build.path");
+
+    if (verbose) {
+      System.out.println(I18n.format(_("Compile Core: {0} variant: {1} build: {2}"), coreFolder.toString(), variantFolder.toString(), buildFolder.toString()));
+    }
 
     List<File> includeFolders = new ArrayList<File>();
     includeFolders.add(coreFolder); // include core path only

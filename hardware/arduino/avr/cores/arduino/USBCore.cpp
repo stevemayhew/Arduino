@@ -20,7 +20,7 @@
 #include "USBAPI.h"
 #include "USBDesc.h"
 
-#if defined(USBCON)
+#if defined(USBCON) && !defined(USE_LUFA)
 
 #define EP_TYPE_CONTROL				0x00
 #define EP_TYPE_BULK_IN				0x81
